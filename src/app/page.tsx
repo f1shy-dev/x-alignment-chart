@@ -114,7 +114,8 @@ export default function AlignmentChart() {
           toast.success(`Loaded ${loadedImages.length} saved placements`);
         }
       } catch (error) {
-        logger.error("Failed to load users from IndexedDB:", error);
+        logger.error("Failed to load users from IndexedDB:");
+        console.error(error);
       } finally {
         setIsLoading(false);
       }
@@ -262,7 +263,8 @@ export default function AlignmentChart() {
         )
       );
     } catch (error) {
-      logger.error("Error loading profile image:", error);
+      logger.error("Error loading profile image:");
+      console.error(error);
 
       setImages((prev) =>
         prev.map((img) =>
@@ -334,7 +336,8 @@ export default function AlignmentChart() {
         setNewAnalysisId(null);
       }, 5000);
     } catch (error) {
-      logger.error("Error auto-analyzing:", error);
+      logger.error("Error auto-analyzing:");
+      console.error(error);
 
       setImages((prev) => prev.filter((img) => img.username !== cleanUsername));
 
@@ -446,7 +449,8 @@ export default function AlignmentChart() {
     setImages(images.filter((img) => img.id !== id));
 
     removeCachedPlacement(id).catch((error) => {
-      logger.error("Error removing placement from IndexedDB:", error);
+      logger.error("Error removing placement from IndexedDB:");
+      console.error(error);
     });
   };
 

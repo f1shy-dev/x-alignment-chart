@@ -39,7 +39,9 @@ export async function fetchTwitterProfile(username: string): Promise<XProfile | 
       },
       body: JSON.stringify({
         ids: [`https://x.com/${cleanUsername}`],
-        text: true,
+        text: {
+          "includeHtmlTags": true
+        },
         livecrawl: "always",
       }),
     })
@@ -58,23 +60,25 @@ export async function fetchTwitterProfile(username: string): Promise<XProfile | 
     }
     const parsedData = parseExaUserString(validatedData.results[0].text)
     if (!parsedData.success || !parsedData.data) {
-      logger.error("Error parsing tweets:", parsedData.error)
+      logger.error("Error parsing tweets:")
+      console.error(parsedData.error)
       return null
     }
 
     const tweets = parsedData.data.tweets
 
     logger.info(`Found ${tweets.length} tweets for @${cleanUsername}`)
-    logger.debug(tweets.slice(0, 20).map((tweet) =>
-      `${tweet.text}
+    // logger.debug(tweets.slice(0, 20).map((tweet) =>
+    //   `${tweet.text}
 
-    ❤️ ${tweet.favorite_count}, 💬 ${tweet.reply_count}, 🔄 ${tweet.retweet_count}, 🔗 ${tweet.quote_count}
-    --------------------------------`
-    ).join("\n"))
+    // ❤️ ${tweet.favorite_count}, 💬 ${tweet.reply_count}, 🔄 ${tweet.retweet_count}, 🔗 ${tweet.quote_count}
+    // --------------------------------`
+    // ).join("\n"))
 
     return parsedData.data
   } catch (error) {
-    logger.error(`Error fetching tweets for @${cleanUsername} from Exa:`, error)
+    logger.error(`Error fetching tweets for @${cleanUsername} from Exa:`)
+    console.error(error)
     return null
   }
 }

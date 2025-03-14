@@ -45,11 +45,20 @@ export async function analyseUser(username: string): Promise<AlignmentAnalysis &
 
     const profile_str = JSON.stringify({ ...profile, tweets: undefined }, null, 2)
 
-    const tweetTexts = profile.tweets.map((tweet) =>
-      `<post${tweet.is_quote_status ? " is_quote=\"true\"" : ""}>
-${tweet.text}
-${tweet.favorite_count} likes, ${tweet.reply_count} replies, ${tweet.retweet_count} retweets, ${tweet.quote_count} quotes
-</post>`
+    const tweetTexts = profile.tweets.map((tweet) => {
+      const base = `<post${tweet.is_quote_status ? " is_quote=\"true\"" : ""}>
+${tweet.text}`;
+
+      const stats = [
+        `${tweet.favorite_count ?? "?"} likes`,
+        `${tweet.reply_count ?? "?"} replies`,
+        `${tweet.retweet_count ?? "?"} retweets`,
+        `${tweet.quote_count ?? "?"} quotes`,
+      ].filter(x => !x.startsWith("?")).join(", ")
+
+      return `${base}\n\n${stats}\n</post>`
+
+    }
     ).join("\n\n")
 
     const messages = [
@@ -91,6 +100,7 @@ ${tweetTexts}
     ] satisfies CoreMessage[]
 
 
+
     const { object } = await generateObject({
       model: openai("gpt-4o-mini"),
       temperature: 0.8,
@@ -109,7 +119,8 @@ ${tweetTexts}
 
     return { ...object, cached: false, isError: false }
   } catch (error) {
-    logger.error(`Error analyzing tweets for @${cleanUsername}:`, error)
+    logger.error(`Error analyzing tweets for @${cleanUsername}:`)
+    console.error(error)
     return {
       lawfulChaotic: 0,
       goodEvil: 0,

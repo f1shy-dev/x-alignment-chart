@@ -128,19 +128,22 @@ export async function cachePlacementsLocally(placements: Placement[]): Promise<v
                 };
 
                 request.onerror = (event) => {
-                    logger.error("Error adding placement to IndexedDB:", event);
+                    logger.error("Error adding placement to IndexedDB:");
+                    console.error(event);
                     reject(new Error("Failed to add placement to IndexedDB"));
                 };
             });
         };
 
         clearRequest.onerror = (event) => {
-            logger.error("Error clearing IndexedDB store:", event);
+            logger.error("Error clearing IndexedDB store:");
+            console.error(event);
             reject(new Error("Failed to clear IndexedDB store"));
         };
 
         transaction.onerror = (event) => {
-            logger.error("Transaction error:", event);
+            logger.error("Transaction error:");
+            console.error(event);
             reject(new Error("IndexedDB transaction failed"));
         };
     });
