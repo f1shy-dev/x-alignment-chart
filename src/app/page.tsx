@@ -25,6 +25,7 @@ import {
   Database,
   MessageSquare,
   Trash,
+  Share2,
 } from "lucide-react";
 import { analyseUser, type AlignmentAnalysis } from "./actions/analyze-tweets";
 import {
@@ -60,6 +61,8 @@ import {
   AlertDialogCancel,
   AlertDialogAction,
 } from "@/components/ui/alert-dialog";
+import { useSearchParams } from "next/navigation";
+import { createShareLink, getSharedGraph } from "./actions/share-graph";
 
 interface Position {
   x: number;
@@ -84,6 +87,7 @@ export default function AlignmentChart() {
   const [username, setUsername] = useState("");
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [isSharing, setIsSharing] = useState(false);
   const chartRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [activeDragId, setActiveDragId] = useState<string | null>(null);
@@ -91,6 +95,7 @@ export default function AlignmentChart() {
   const [chartSize, setChartSize] = useState({ width: 0, height: 0 });
   const [isMobile, setIsMobile] = useState(false);
   const [newAnalysisId, setNewAnalysisId] = useState<string | null>(null);
+  const searchParams = useSearchParams();
 
   const debouncedSave = useDebounce(cachePlacementsLocally, 500);
 
@@ -99,19 +104,96 @@ export default function AlignmentChart() {
       try {
         setIsLoading(true);
         await initIndexedDB();
-        const cachedPlacements = await loadCachedPlacements();
 
-        if (cachedPlacements.length > 0) {
-          const loadedImages: Placement[] = cachedPlacements.map((item) => ({
-            ...item,
-            isDragging: false,
-            loading: false,
-            position: item.position,
-            timestamp: item.timestamp ? new Date(item.timestamp) : new Date(),
-          }));
+        // Check for shared graph ID in URL
+        const graphId = searchParams.get("g");
 
-          setImages(loadedImages);
-          toast.success(`Loaded ${loadedImages.length} saved placements`);
+        if (graphId) {
+          logger.info(
+            {
+              action: "client_attempt_load_shared_graph",
+              graphId,
+            },
+            `Client attempting to load shared graph with ID: ${graphId}`
+          );
+
+          // Load shared graph
+          const sharedPlacements = await getSharedGraph(graphId);
+
+          if (sharedPlacements && sharedPlacements.length > 0) {
+            const placements: Placement[] = sharedPlacements.map(
+              (placement) => ({
+                ...placement,
+                isDragging: false,
+                loading: false,
+                position: placement.position,
+                timestamp: placement.timestamp
+                  ? new Date(placement.timestamp)
+                  : new Date(),
+              })
+            );
+
+            setImages(placements);
+            logger.info(
+              {
+                action: "client_shared_graph_loaded",
+                graphId,
+                placementsCount: placements.length,
+              },
+              `Client successfully loaded shared graph with ID: ${graphId}, Items: ${placements.length}`
+            );
+            toast.success("Loaded shared alignment chart");
+          } else {
+            logger.warn(
+              {
+                action: "client_shared_graph_not_found",
+                graphId,
+              },
+              `Client failed to load shared graph with ID: ${graphId} - not found or expired`
+            );
+            toast.error("Shared chart not found or expired");
+            const cachedPlacements = await loadCachedPlacements();
+            if (cachedPlacements.length > 0) {
+              const placements: Placement[] = cachedPlacements.map(
+                (placement) => ({
+                  ...placement,
+                  isDragging: false,
+                  loading: false,
+                  position: placement.position,
+                  timestamp: placement.timestamp
+                    ? new Date(placement.timestamp)
+                    : new Date(),
+                })
+              );
+              setImages(placements);
+              logger.info(
+                {
+                  action: "client_loaded_cached_placements",
+                  placementsCount: placements.length,
+                },
+                `Client loaded ${placements.length} cached placements after shared graph failed to load`
+              );
+              toast.success(`Loaded ${placements.length} saved placements`);
+            }
+          }
+        } else {
+          // Load user's cached placements
+          const cachedPlacements = await loadCachedPlacements();
+          if (cachedPlacements.length > 0) {
+            const placements: Placement[] = cachedPlacements.map(
+              (placement) => ({
+                ...placement,
+                isDragging: false,
+                loading: false,
+                position: placement.position,
+                timestamp: placement.timestamp
+                  ? new Date(placement.timestamp)
+                  : new Date(),
+              })
+            );
+            setImages(placements);
+            toast.success(`Loaded ${placements.length} saved placements`);
+          }
         }
       } catch (error) {
         logger.error("Failed to load users from IndexedDB:", error);
@@ -121,7 +203,7 @@ export default function AlignmentChart() {
     }
 
     loadCachedUsers();
-  }, []);
+  }, [searchParams]);
 
   // Save users to IndexedDB whenever the images state changes
   useEffect(() => {
@@ -471,6 +553,74 @@ export default function AlignmentChart() {
     }))
     .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
 
+  const handleShareChart = async () => {
+    try {
+      if (images.length === 0) {
+        logger.warn(
+          {
+            action: "client_share_attempt_empty_chart",
+          },
+          "Client attempted to share an empty chart"
+        );
+        toast.error("Add some users to the chart first");
+        return;
+      }
+
+      setIsSharing(true);
+      logger.info(
+        {
+          action: "client_share_chart_start",
+          imageCount: images.length,
+          usernames: images.map((img) => img.username).filter(Boolean),
+        },
+        `Client starting to share chart with ${images.length} placements`
+      );
+
+      const storablePlacements: StoredPlacement[] = images.map((img) => ({
+        id: img.id,
+        src: img.src,
+        position: img.position,
+        username: img.username,
+        analysis: img.analysis,
+        isAiPlaced: img.isAiPlaced,
+        timestamp: img.timestamp?.toISOString(),
+      }));
+
+      const shareId = await createShareLink(storablePlacements);
+      const shareUrl = `${window.location.origin}/?g=${shareId}`;
+
+      // Copy to clipboard
+      await navigator.clipboard.writeText(shareUrl);
+
+      logger.info(
+        {
+          action: "client_share_chart_success",
+          shareId,
+          imageCount: images.length,
+        },
+        `Client successfully shared chart with ID: ${shareId}`
+      );
+
+      toast.success("Share link copied to clipboard!", {
+        description:
+          "Share this link with others to show them your alignment chart.",
+        duration: 5000,
+      });
+    } catch (error) {
+      logger.error(
+        {
+          action: "client_share_chart_error",
+          error,
+        },
+        "Error sharing chart from client"
+      );
+      console.error("Error sharing chart:", error);
+      toast.error("Failed to create share link");
+    } finally {
+      setIsSharing(false);
+    }
+  };
+
   return (
     <div
       className={`flex flex-col ${
@@ -746,50 +896,68 @@ export default function AlignmentChart() {
       </div>
 
       <AnalysisPanel analyses={analysesForPanel} newAnalysisId={newAnalysisId}>
-        <AlertDialog>
-          <AlertDialogTrigger asChild>
-            <Button
-              size="sm"
-              className="relative group h-12 min-w-12 rounded-full shadow-lg bg-red-500 hover:bg-red-800 transition-all duration-200"
-              disabled={images.length === 0}
-            >
-              <Trash className="!size-5 text-white" />
-              <span className="text-base text-white hidden xs:block">
-                Clear
-              </span>
-            </Button>
-          </AlertDialogTrigger>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>Are you sure?</AlertDialogTitle>
-              <AlertDialogDescription>
-                This will remove {images.length > 1 ? "all of your" : "your"}{" "}
-                {images.length} saved placements from the chart.
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel>Cancel</AlertDialogCancel>
-              <AlertDialogAction
-                onClick={async () => {
-                  setImages([]);
-                  clearLocalCache().catch(logger.error);
-                }}
-              >
-                Continue
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
-      </AnalysisPanel>
+        <div className="flex gap-3">
+          <TooltipProvider>
+            <Tooltip delayDuration={100}>
+              <TooltipTrigger asChild>
+                <Button
+                  size="sm"
+                  className="relative group h-12 min-w-12 rounded-full shadow-lg bg-purple-500 hover:bg-purple-800 transition-all duration-200"
+                  onClick={handleShareChart}
+                  disabled={isSharing || images.length === 0}
+                >
+                  {isSharing ? (
+                    <div className="h-5 w-5 animate-spin rounded-full border-2 border-solid border-white border-r-transparent"></div>
+                  ) : (
+                    <Share2 className="!size-5 text-white" />
+                  )}
+                  <span className="text-base text-white hidden xs:block">
+                    Share
+                  </span>
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="top">
+                <p>Share your alignment chart</p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
 
-      {/* {isLoading && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white p-5 rounded-lg flex flex-col items-center gap-3">
-            <div className="h-8 w-8 animate-spin rounded-full border-4 border-solid border-purple-500 border-r-transparent"></div>
-            <p>Loading saved users...</p>
-          </div>
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button
+                size="sm"
+                className="relative group h-12 min-w-12 rounded-full shadow-lg bg-red-500 hover:bg-red-800 transition-all duration-200"
+                disabled={images.length === 0}
+              >
+                <Trash className="!size-5 text-white" />
+                <span className="text-base text-white hidden xs:block">
+                  Clear
+                </span>
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  This will remove {images.length > 1 ? "all of your" : "your"}{" "}
+                  {images.length} saved placements from the chart.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction
+                  onClick={async () => {
+                    setImages([]);
+                    clearLocalCache().catch(logger.error);
+                  }}
+                >
+                  Continue
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         </div>
-      )} */}
+      </AnalysisPanel>
     </div>
   );
 }
